@@ -207,8 +207,8 @@ describe('Daemon CLI: Recording', () => {
     const events = readRecordingEvents(extractedDir);
 
     // Look for group before event
-    const beforeEvents = events.filter(e => e.type === 'before' && e.title === 'Login' && e.method === 'group');
-    assert.ok(beforeEvents.length > 0, 'Should have before event with title "Login" and method "group"');
+    const beforeEvents = events.filter(e => e.type === 'before' && e.title === 'Login' && e.method === 'tracingGroup');
+    assert.ok(beforeEvents.length > 0, 'Should have before event with title "Login" and method "tracingGroup"');
 
     // Look for matching after event
     const callId = beforeEvents[0].callId;

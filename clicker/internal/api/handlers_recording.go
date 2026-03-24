@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -12,9 +14,12 @@ import (
 func (r *Router) handleRecordingStart(session *BrowserSession, cmd bidiCommand) {
 	opts := ParseRecordingOptions(cmd.Params)
 
+	// Best-effort viewport query
+	viewport := r.queryViewport(session)
+
 	// Create and start the recorder
 	recorder := NewRecorder()
-	recorder.Start(opts)
+	recorder.Start(opts, viewport)
 
 	session.mu.Lock()
 	session.recorder = recorder
@@ -85,7 +90,10 @@ func (r *Router) handleRecordingStartChunk(session *BrowserSession, cmd bidiComm
 	name, _ := cmd.Params["name"].(string)
 	title, _ := cmd.Params["title"].(string)
 
-	recorder.StartChunk(name, title)
+	// Best-effort viewport query
+	viewport := r.queryViewport(session)
+
+	recorder.StartChunk(name, title, viewport)
 	r.sendSuccess(session, cmd.ID, map[string]interface{}{})
 }
 
@@ -384,4 +392,27 @@ func CaptureRecordingScreenshot(s Session, recorder *Recorder, actionEnd time.Ti
 
 	w, h := ImageDimensions(imgData)
 	recorder.AddScreenshot(imgData, context, w, h, actionEnd)
+}
+
+// queryViewport queries the browser for the current viewport size.
+// Returns nil if the query fails (best-effort).
+func (r *Router) queryViewport(session *BrowserSession) map[string]interface{} {
+	context, err := r.getContext(session)
+	if err != nil {
+		return nil
+	}
+	result, err := r.evalSimpleScript(session, context, "() => window.innerWidth + ',' + window.innerHeight")
+	if err != nil {
+		return nil
+	}
+	parts := strings.SplitN(result, ",", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+	w, err1 := strconv.Atoi(parts[0])
+	h, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return nil
+	}
+	return map[string]interface{}{"width": w, "height": h}
 }

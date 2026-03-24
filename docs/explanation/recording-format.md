@@ -21,13 +21,13 @@ record.zip
 ├── trace.trace             # Main event timeline (newline-delimited JSON)
 ├── trace.network           # Network events (newline-delimited JSON)
 └── resources/
-    ├── ABC123-1773879004791.jpeg  # Screenshot frames (pageId-timestamp.ext)
-    └── ABC123-1773879004850.jpeg  # Other resources (pageId-timestamp.ext)
+    ├── page@abc123-1773879004791.jpeg  # Screenshot frames (pageId-timestamp.ext)
+    └── page@abc123-1773879004850.jpeg  # Other resources (pageId-timestamp.ext)
 ```
 
 For chunked recordings, the first chunk uses `trace.trace` / `trace.network`. Subsequent chunks use `<N>.trace` / `<N>.network` (e.g., `1.trace`, `2.trace`).
 
-Resource files use Playwright-compatible naming: `<pageId>-<wallTimeMs>.<ext>` (e.g., `resources/ABC123-1773879004791.jpeg`).
+Resource files use Playwright-compatible naming: `<pageId>-<wallTimeMs>.<ext>` (e.g., `resources/page@abc123-1773879004791.jpeg`).
 
 ## Event Files
 
@@ -38,18 +38,20 @@ Newline-delimited JSON. Each line is a self-contained event object with a `type`
 **`context-options`** — Always the first event. Metadata about the recording session.
 
 ```json
-{"type":"context-options","browserName":"chromium","platform":"darwin","wallTime":1708000000000,"monotonicTime":0,"title":"my test","contextId":"context@18d5a2b3c00","options":{},"sdkLanguage":"javascript","version":8,"origin":"library"}
+{"version":8,"type":"context-options","origin":"library","libraryName":"vibium","libraryVersion":"26.3.18","browserName":"chromium","platform":"darwin","wallTime":1708000000000,"monotonicTime":0,"sdkLanguage":"javascript","title":"my test","contextId":"context@18d5a2b3c00","options":{"viewport":{"width":1280,"height":720}}}
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `libraryName` | string | Always `"vibium"` |
+| `libraryVersion` | string | Version of the vibium binary (e.g., `"26.3.18"`) |
 | `browserName` | string | Always `"chromium"` |
 | `platform` | string | OS: `"darwin"`, `"linux"`, or `"windows"` |
 | `wallTime` | number | Absolute Unix timestamp in milliseconds (calendar time) |
 | `monotonicTime` | number | Relative ms since recording start (always `0` for the first event) |
 | `title` | string | From `start({ title })` or `start({ name })` |
 | `contextId` | string | Unique context ID for this recording session (e.g., `"context@18d5a2b3c00"`) |
-| `options` | object | Browser context options (currently `{}`) |
+| `options` | object | Browser context options. Contains `viewport` (`{width, height}`) when available. |
 | `sdkLanguage` | string | Always `"javascript"` |
 | `version` | number | Trace format version (currently `8`) |
 | `origin` | string | Always `"library"` |
@@ -57,7 +59,7 @@ Newline-delimited JSON. Each line is a self-contained event object with a `type`
 **`screencast-frame`** — A screenshot captured during recording. References an image file in `resources/` by name. Default format is JPEG (configurable via `format` and `quality` start options).
 
 ```json
-{"type":"screencast-frame","pageId":"ABCDEF123","sha1":"ABCDEF123-1773879004791.jpeg","width":1280,"height":720,"timestamp":100}
+{"type":"screencast-frame","pageId":"page@abcdef123","sha1":"page@abcdef123-1773879004791.jpeg","width":1280,"height":720,"timestamp":100}
 ```
 
 | Field | Type | Description |
@@ -73,7 +75,7 @@ Screenshots are captured per-action in `dispatch()`, with a CAS guard to avoid f
 **`frame-snapshot`** — A DOM snapshot. Contains a nested `snapshot` object with structured HTML as an array tree.
 
 ```json
-{"type":"frame-snapshot","snapshot":{"callId":"call@3","snapshotName":"before@call@3","pageId":"ABCDEF123","frameId":"ABCDEF123","frameUrl":"https://example.com","doctype":"<!DOCTYPE html>","html":["HTML",{"lang":"en"},["HEAD",{}],["BODY",{},["IMG",{"src":"data:image/jpeg;base64,...","style":"width:100%"}]]],"viewport":{"width":1280,"height":720},"timestamp":200,"wallTime":200,"resourceOverrides":[{"url":"data:image/jpeg;base64,...","sha1":"a1b2c3..."}],"isMainFrame":true}}
+{"type":"frame-snapshot","snapshot":{"callId":"call@3","snapshotName":"before@call@3","pageId":"page@abcdef123","frameId":"page@abcdef123","frameUrl":"https://example.com","doctype":"<!DOCTYPE html>","html":["HTML",{"lang":"en"},["HEAD",{}],["BODY",{},["IMG",{"src":"data:image/jpeg;base64,...","style":"width:100%"}]]],"viewport":{"width":1280,"height":720},"timestamp":200,"wallTime":200,"resourceOverrides":[{"url":"data:image/jpeg;base64,...","sha1":"a1b2c3..."}],"isMainFrame":true}}
 ```
 
 | Field | Type | Description |
@@ -98,13 +100,13 @@ Screenshots are captured per-action in `dispatch()`, with a CAS guard to avoid f
 Every vibium command emits a `before`/`after` pair automatically — both mutations (`click`, `fill`, `navigate`) and read-only queries (`text`, `isVisible`, `getAttribute`).
 
 ```json
-{"type":"before","callId":"call@1","title":"Page.navigate","class":"Page","method":"vibium:page.navigate","pageId":"ABCDEF123","params":{"url":"https://example.com"},"startTime":300}
-{"type":"after","callId":"call@1","afterSnapshot":"after@call@1","endTime":400}
-{"type":"before","callId":"call@2","beforeSnapshot":"before@call@2","title":"Element.click","class":"Element","method":"vibium:element.click","pageId":"ABCDEF123","params":{"selector":"#login"},"startTime":500}
+{"type":"before","callId":"call@1","startTime":300,"class":"Page","method":"vibium:page.navigate","pageId":"page@abcdef123","params":{"url":"https://example.com"},"title":"Page.navigate"}
+{"type":"after","callId":"call@1","endTime":400,"afterSnapshot":"after@call@1"}
+{"type":"before","callId":"call@2","startTime":500,"class":"Element","method":"vibium:element.click","pageId":"page@abcdef123","params":{"selector":"#login"},"beforeSnapshot":"before@call@2","title":"Element.click"}
 {"type":"input","callId":"call@2","point":{"x":640,"y":360},"box":{"x":600,"y":340,"width":80,"height":40}}
 {"type":"after","callId":"call@2","endTime":600}
-{"type":"before","callId":"call@3","title":"Element.text","class":"Element","method":"vibium:element.text","pageId":"ABCDEF123","params":{"selector":".result"},"startTime":700}
-{"type":"after","callId":"call@3","afterSnapshot":"after@call@3","endTime":750}
+{"type":"before","callId":"call@3","startTime":700,"class":"Element","method":"vibium:element.text","pageId":"page@abcdef123","params":{"selector":".result"},"title":"Element.text"}
+{"type":"after","callId":"call@3","endTime":750,"afterSnapshot":"after@call@3"}
 ```
 
 **`before` fields:**
@@ -146,9 +148,9 @@ The `dispatch()` wrapper in the router records these markers — every vibium co
 Groups are named spans from `startGroup()` / `stopGroup()`. They wrap multiple actions under a single label in the timeline.
 
 ```json
-{"type":"before","callId":"call@4","title":"login flow","class":"Tracing","method":"tracingGroup","params":{"name":"login flow"},"startTime":300}
-{"type":"before","callId":"call@5","title":"Element.fill","class":"Element","method":"vibium:element.fill","pageId":"ABCDEF123","parentId":"call@4","params":{"selector":"#user","value":"admin"},"startTime":350}
-{"type":"after","callId":"call@5","afterSnapshot":"after@call@5","endTime":380}
+{"type":"before","callId":"call@4","startTime":300,"class":"Tracing","method":"tracingGroup","params":{"name":"login flow"},"title":"login flow"}
+{"type":"before","callId":"call@5","startTime":350,"class":"Element","method":"vibium:element.fill","pageId":"page@abcdef123","parentId":"call@4","params":{"selector":"#user","value":"admin"},"title":"Element.fill"}
+{"type":"after","callId":"call@5","endTime":380,"afterSnapshot":"after@call@5"}
 {"type":"after","callId":"call@4","endTime":500}
 ```
 
@@ -186,7 +188,7 @@ Newline-delimited JSON. Each line is a `resource-snapshot` event containing a HA
 Raw BiDi network events (`network.beforeRequestSent`, `network.responseCompleted`, `network.fetchError`) are automatically correlated by request ID and transformed into HAR entries during recording.
 
 ```json
-{"type":"resource-snapshot","snapshot":{"startedDateTime":"2024-02-15T10:00:00.000Z","time":45,"request":{"method":"GET","url":"https://example.com/","httpVersion":"HTTP/1.1","cookies":[],"headers":[{"name":"Host","value":"example.com"}],"queryString":[],"headersSize":250,"bodySize":0},"response":{"status":200,"statusText":"OK","httpVersion":"HTTP/1.1","cookies":[],"headers":[{"name":"Content-Type","value":"text/html"}],"content":{"size":1234,"mimeType":"text/html"},"redirectURL":"","headersSize":-1,"bodySize":1234},"cache":{},"timings":{"send":-1,"wait":45,"receive":-1},"_monotonicTime":300,"_frameref":"ABC123"}}
+{"type":"resource-snapshot","snapshot":{"startedDateTime":"2024-02-15T10:00:00.000Z","time":45,"request":{"method":"GET","url":"https://example.com/","httpVersion":"HTTP/1.1","cookies":[],"headers":[{"name":"Host","value":"example.com"}],"queryString":[],"headersSize":250,"bodySize":0},"response":{"status":200,"statusText":"OK","httpVersion":"HTTP/1.1","cookies":[],"headers":[{"name":"Content-Type","value":"text/html"}],"content":{"size":1234,"mimeType":"text/html"},"redirectURL":"","headersSize":-1,"bodySize":1234},"cache":{},"timings":{"send":-1,"wait":45,"receive":-1},"_monotonicTime":300,"_frameref":"page@abc123"}}
 ```
 
 | Field | Type | Description |
@@ -212,7 +214,7 @@ Binary assets referenced by name from the event files. Resource files include th
 | Screenshot frames (JPEG by default, or PNG) | `screencast-frame` events |
 | DOM snapshot images | `frame-snapshot` resourceOverrides |
 
-Resource names use Playwright-compatible format: `<pageId>-<wallTimeMs>.<ext>` (e.g., `resources/ABC123-1773879004791.jpeg`). Each screenshot gets a unique name based on its page and capture time.
+Resource names use Playwright-compatible format: `<pageId>-<wallTimeMs>.<ext>` (e.g., `resources/page@abc123-1773879004791.jpeg`). Each screenshot gets a unique name based on its page and capture time.
 
 ## How Recording Works
 

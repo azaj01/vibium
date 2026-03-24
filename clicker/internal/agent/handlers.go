@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -357,6 +358,29 @@ func (h *Handlers) getContext() string {
 		return ""
 	}
 	return tree.Contexts[0].Context
+}
+
+// queryViewport queries the browser for the current viewport size.
+// Returns nil if the query fails (best-effort).
+func (h *Handlers) queryViewport() map[string]interface{} {
+	context := h.getContext()
+	if context == "" {
+		return nil
+	}
+	result, err := api.EvalSimpleScript(h.newSession(), context, "() => window.innerWidth + ',' + window.innerHeight")
+	if err != nil {
+		return nil
+	}
+	parts := strings.SplitN(result, ",", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+	w, err1 := strconv.Atoi(parts[0])
+	h2, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return nil
+	}
+	return map[string]interface{}{"width": w, "height": h2}
 }
 
 // mcpToolToMethod maps an MCP tool name to a vibium: method name so the
@@ -3695,7 +3719,8 @@ func (h *Handlers) browserRecordStart(args map[string]interface{}) (*ToolsCallRe
 	name := opts.Name
 
 	h.recorder = api.NewRecorder()
-	h.recorder.Start(opts)
+	viewport := h.queryViewport()
+	h.recorder.Start(opts, viewport)
 
 	// Subscribe to events and feed them to the recorder
 	h.client.SendCommand("session.subscribe", map[string]interface{}{
@@ -3808,7 +3833,8 @@ func (h *Handlers) browserRecordStartChunk(args map[string]interface{}) (*ToolsC
 	name, _ := args["name"].(string)
 	title, _ := args["title"].(string)
 
-	h.recorder.StartChunk(name, title)
+	viewport := h.queryViewport()
+	h.recorder.StartChunk(name, title, viewport)
 
 	return &ToolsCallResult{
 		Content: []Content{{

@@ -7,10 +7,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -130,7 +132,8 @@ func (t *Recorder) IsRecording() bool {
 }
 
 // Start begins recording with the given options.
-func (t *Recorder) Start(opts RecordingStartOptions) {
+// viewport is the browser viewport size (may be nil if unknown).
+func (t *Recorder) Start(opts RecordingStartOptions, viewport map[string]interface{}) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -151,19 +154,27 @@ func (t *Recorder) Start(opts RecordingStartOptions) {
 		title = opts.Name
 	}
 
+	// Build options map
+	options := map[string]interface{}{}
+	if viewport != nil {
+		options["viewport"] = viewport
+	}
+
 	// First event must be context-options (required by Playwright trace viewer / Record Player)
 	t.events = append(t.events, recordEvent{
-		"type":          "context-options",
-		"browserName":   "chromium",
-		"platform":      runtime.GOOS,
-		"wallTime":      float64(t.startTime),
-		"monotonicTime": float64(0),
-		"title":         title,
-		"contextId":     t.contextId,
-		"options":       map[string]interface{}{},
-		"sdkLanguage":   "javascript",
-		"version":       8,
-		"origin":        "library",
+		"type":           "context-options",
+		"browserName":    "chromium",
+		"platform":       runtime.GOOS,
+		"wallTime":       float64(t.startTime),
+		"monotonicTime":  float64(0),
+		"title":          title,
+		"contextId":      t.contextId,
+		"options":        options,
+		"sdkLanguage":    "javascript",
+		"version":        8,
+		"origin":         "library",
+		"libraryName":    "vibium",
+		"libraryVersion": Version,
 	})
 }
 
@@ -181,7 +192,8 @@ func (t *Recorder) Stop() ([]byte, error) {
 }
 
 // StartChunk starts a new chunk within the current recording.
-func (t *Recorder) StartChunk(name, title string) {
+// viewport is the browser viewport size (may be nil if unknown).
+func (t *Recorder) StartChunk(name, title string, viewport map[string]interface{}) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -195,18 +207,26 @@ func (t *Recorder) StartChunk(name, title string) {
 		chunkTitle = name
 	}
 
+	// Build options map
+	options := map[string]interface{}{}
+	if viewport != nil {
+		options["viewport"] = viewport
+	}
+
 	t.events = append(t.events, recordEvent{
-		"type":          "context-options",
-		"browserName":   "chromium",
-		"platform":      runtime.GOOS,
-		"wallTime":      float64(t.monotonicBase),
-		"monotonicTime": float64(0),
-		"title":         chunkTitle,
-		"contextId":     t.contextId,
-		"options":       map[string]interface{}{},
-		"sdkLanguage":   "javascript",
-		"version":       8,
-		"origin":        "library",
+		"type":           "context-options",
+		"browserName":    "chromium",
+		"platform":       runtime.GOOS,
+		"wallTime":       float64(t.monotonicBase),
+		"monotonicTime":  float64(0),
+		"title":          chunkTitle,
+		"contextId":      t.contextId,
+		"options":        options,
+		"sdkLanguage":    "javascript",
+		"version":        8,
+		"origin":         "library",
+		"libraryName":    "vibium",
+		"libraryVersion": Version,
 	})
 }
 
@@ -293,11 +313,11 @@ func (t *Recorder) StoreResource(name string, data []byte) {
 }
 
 // ScreenshotName generates a Playwright-compatible resource name for a screenshot.
-// Format: <pageId>-<wallTimeMs>.<ext> (e.g. "ABC123-1773879004791.jpeg")
+// Format: page@<lowercase-hex>-<wallTimeMs>.<ext> (e.g. "page@abc123-1773879004791.jpeg")
 func (t *Recorder) ScreenshotName(pageID string, ts time.Time) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return fmt.Sprintf("%s-%d.%s", pageID, ts.UnixMilli(), t.imageExtension())
+	return fmt.Sprintf("%s-%d.%s", formatPageID(pageID), ts.UnixMilli(), t.imageExtension())
 }
 
 // apiNameFromMethod maps a vibium: method to (class, title) for recording display.
@@ -399,6 +419,15 @@ func (t *Recorder) RecordAction(callId, method string, params map[string]interfa
 		return
 	}
 
+	// Shallow-copy params and lowercase context for recording (don't mutate caller's map)
+	recordParams := make(map[string]interface{}, len(params))
+	for k, v := range params {
+		recordParams[k] = v
+	}
+	if ctx, ok := recordParams["context"].(string); ok && ctx != "" {
+		recordParams["context"] = strings.ToLower(ctx)
+	}
+
 	class, title := apiNameFromMethod(method)
 	ev := recordEvent{
 		"type":      "before",
@@ -406,14 +435,14 @@ func (t *Recorder) RecordAction(callId, method string, params map[string]interfa
 		"title":     title,
 		"class":     class,
 		"method":    method,
-		"params":    params,
+		"params":    recordParams,
 		"startTime": t.monotonicNow(),
 	}
 	// Add pageId so the viewer can match actions to page screenshots
-	if ctx, ok := params["context"].(string); ok && ctx != "" {
-		ev["pageId"] = ctx
+	if ctx, ok := recordParams["context"].(string); ok && ctx != "" {
+		ev["pageId"] = formatPageID(ctx)
 	} else if pageId != "" {
-		ev["pageId"] = pageId
+		ev["pageId"] = formatPageID(pageId)
 	}
 	if beforeSnapshot != "" {
 		ev["beforeSnapshot"] = beforeSnapshot
@@ -476,6 +505,15 @@ func (t *Recorder) RecordBidiCommand(method string, params map[string]interface{
 		return ""
 	}
 
+	// Shallow-copy params and lowercase context for recording (don't mutate caller's map)
+	recordParams := make(map[string]interface{}, len(params))
+	for k, v := range params {
+		recordParams[k] = v
+	}
+	if ctx, ok := recordParams["context"].(string); ok && ctx != "" {
+		recordParams["context"] = strings.ToLower(ctx)
+	}
+
 	t.actionCounter++
 	callId := fmt.Sprintf("call@%d", t.actionCounter)
 	ev := recordEvent{
@@ -484,7 +522,7 @@ func (t *Recorder) RecordBidiCommand(method string, params map[string]interface{
 		"title":     method,
 		"class":     "BiDi",
 		"method":    method,
-		"params":    params,
+		"params":    recordParams,
 		"startTime": t.monotonicNow(),
 	}
 	// Link to parent group for nesting in Record Player
@@ -526,11 +564,12 @@ func (t *Recorder) AddScreenshot(pngData []byte, pageID string, width, height in
 		ts = time.Now()
 	}
 
-	name := fmt.Sprintf("%s-%d.%s", pageID, ts.UnixMilli(), t.imageExtension())
+	formattedPageID := formatPageID(pageID)
+	name := fmt.Sprintf("%s-%d.%s", formattedPageID, ts.UnixMilli(), t.imageExtension())
 	t.resources[name] = pngData
 	t.events = append(t.events, recordEvent{
 		"type":      "screencast-frame",
-		"pageId":    pageID,
+		"pageId":    formattedPageID,
 		"sha1":      name,
 		"width":     width,
 		"height":    height,
@@ -558,13 +597,14 @@ func (t *Recorder) AddFrameSnapshot(callId, snapshotType, pageId, frameURL, doct
 	snapshotName := snapshotType + "@" + callId
 	now := t.monotonicNow()
 
+	formattedPageId := formatPageID(pageId)
 	t.events = append(t.events, recordEvent{
 		"type": "frame-snapshot",
 		"snapshot": map[string]interface{}{
 			"callId":            callId,
 			"snapshotName":      snapshotName,
-			"pageId":            pageId,
-			"frameId":           pageId,
+			"pageId":            formattedPageId,
+			"frameId":           formattedPageId,
 			"frameUrl":          frameURL,
 			"doctype":           doctype,
 			"html":              html,
@@ -638,6 +678,10 @@ func (t *Recorder) RecordBidiEvent(msg string) {
 		}
 
 	default:
+		// Lowercase context in params for consistency
+		if ctx, ok := bidiEvent.Params["context"].(string); ok && ctx != "" {
+			bidiEvent.Params["context"] = strings.ToLower(ctx)
+		}
 		t.events = append(t.events, recordEvent{
 			"type":   "event",
 			"method": bidiEvent.Method,
@@ -754,7 +798,7 @@ func bidiToHAREntry(pending *pendingRequest, responseParams map[string]interface
 		"_monotonicTime": startTime - float64(monotonicBase),
 	}
 	if context != "" {
-		entry["_frameref"] = context
+		entry["_frameref"] = formatPageID(context)
 	}
 
 	return recordEvent{
@@ -969,6 +1013,16 @@ func (t *Recorder) StartScreenshotLoop(captureFunc func() (string, string, error
 func (t *Recorder) buildZipLocked() ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
+	now := time.Now()
+
+	// createEntry creates a zip entry with the current timestamp.
+	createEntry := func(name string) (io.Writer, error) {
+		return zw.CreateHeader(&zip.FileHeader{
+			Name:     name,
+			Method:   zip.Deflate,
+			Modified: now,
+		})
+	}
 
 	// Write trace events
 	var traceName string
@@ -977,12 +1031,12 @@ func (t *Recorder) buildZipLocked() ([]byte, error) {
 	} else {
 		traceName = fmt.Sprintf("%d.trace", t.chunkIndex)
 	}
-	tw, err := zw.Create(traceName)
+	tw, err := createEntry(traceName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create trace entry: %w", err)
 	}
 	for _, event := range t.events {
-		data, err := json.Marshal(event)
+		data, err := marshalEvent(event)
 		if err != nil {
 			continue
 		}
@@ -997,12 +1051,12 @@ func (t *Recorder) buildZipLocked() ([]byte, error) {
 	} else {
 		netName = fmt.Sprintf("%d.network", t.chunkIndex)
 	}
-	nw, err := zw.Create(netName)
+	nw, err := createEntry(netName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network entry: %w", err)
 	}
 	for _, event := range t.network {
-		data, err := json.Marshal(event)
+		data, err := marshalEvent(event)
 		if err != nil {
 			continue
 		}
@@ -1010,9 +1064,9 @@ func (t *Recorder) buildZipLocked() ([]byte, error) {
 		nw.Write([]byte("\n"))
 	}
 
-	// Write resources: resources/<name> (e.g. resources/ABC123-1773879004791.jpeg)
+	// Write resources: resources/<name> (e.g. resources/page@abc123-1773879004791.jpeg)
 	for name, data := range t.resources {
-		rw, err := zw.Create("resources/" + name)
+		rw, err := createEntry("resources/" + name)
 		if err != nil {
 			continue
 		}
@@ -1032,6 +1086,84 @@ func (t *Recorder) imageExtension() string {
 		return "png"
 	}
 	return "jpeg"
+}
+
+// formatPageID converts a raw browsing context ID to Playwright-compatible
+// page ID format: "page@" prefix + lowercase hex.
+func formatPageID(contextID string) string {
+	return "page@" + strings.ToLower(contextID)
+}
+
+// marshalEvent marshals a recordEvent with keys in Playwright-compatible order.
+// "type" always comes first, then known fields in priority order, then any remaining keys alphabetically.
+func marshalEvent(event recordEvent) ([]byte, error) {
+	order := []string{
+		// context-options (version before type to match Playwright)
+		"version",
+		// Common
+		"type",
+		// context-options (continued)
+		"origin", "libraryName", "libraryVersion",
+		"browserName", "platform", "wallTime", "monotonicTime",
+		"sdkLanguage", "title", "contextId", "options",
+		// before/after
+		"callId", "startTime", "endTime",
+		"class", "method", "pageId", "parentId", "params",
+		"beforeSnapshot", "afterSnapshot", "inputSnapshot",
+		// screencast-frame
+		"sha1", "width", "height", "timestamp", "frameSwapWallTime",
+		// input
+		"point", "box",
+		// frame-snapshot
+		"snapshot",
+		// event
+		"time",
+	}
+
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	first := true
+	written := make(map[string]bool)
+
+	for _, key := range order {
+		val, ok := event[key]
+		if !ok {
+			continue
+		}
+		if !first {
+			buf.WriteByte(',')
+		}
+		keyJSON, _ := json.Marshal(key)
+		valJSON, _ := json.Marshal(val)
+		buf.Write(keyJSON)
+		buf.WriteByte(':')
+		buf.Write(valJSON)
+		first = false
+		written[key] = true
+	}
+
+	// Remaining keys alphabetically
+	var remaining []string
+	for key := range event {
+		if !written[key] {
+			remaining = append(remaining, key)
+		}
+	}
+	sort.Strings(remaining)
+	for _, key := range remaining {
+		if !first {
+			buf.WriteByte(',')
+		}
+		keyJSON, _ := json.Marshal(key)
+		valJSON, _ := json.Marshal(event[key])
+		buf.Write(keyJSON)
+		buf.WriteByte(':')
+		buf.Write(valJSON)
+		first = false
+	}
+
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
 }
 
 // decodeBase64 decodes a standard base64 string.
