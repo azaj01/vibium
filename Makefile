@@ -267,9 +267,12 @@ build-java: build-go
 	cd clients/java && ./gradlew build -x test
 
 # Run Java client tests
+# JAVA_PARALLEL: number of parallel test JVMs (each spawns its own Chrome).
+# Default 4; bump for faster CI on machines with more memory.
+JAVA_PARALLEL ?= 4
 test-java: build-go install-browser
-	@echo "--- Java Client Tests ---"
-	cd clients/java && VIBIUM_BIN_PATH=$(CURDIR)/clicker/bin/vibium$(EXE) ./gradlew test
+	@echo "--- Java Client Tests (parallel x$(JAVA_PARALLEL)) ---"
+	cd clients/java && VIBIUM_BIN_PATH=$(CURDIR)/clicker/bin/vibium$(EXE) ./gradlew test -PjavaParallel=$(JAVA_PARALLEL)
 
 # Package Java JAR with native binaries
 package-java: build-go-all
