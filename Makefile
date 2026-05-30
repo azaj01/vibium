@@ -27,7 +27,7 @@ else
   endif
 endif
 
-.PHONY: all build build-go build-js build-go-all package package-js package-python install-browser deps clean clean-go clean-js clean-npm-packages clean-python-packages clean-packages clean-cache clean-all serve test test-cli test-js test-mcp test-daemon test-python test-java test-cleanup double-tap get-version set-version build-java package-java publish-java clean-java jshell help
+.PHONY: all build build-go build-js build-go-all package package-js package-python install-browser deps clean clean-go clean-js clean-npm-packages clean-python-packages clean-packages clean-cache clean-all serve test test-cli test-js test-js-async test-js-sync test-js-process test-mcp test-daemon test-python test-java test-cleanup double-tap get-version set-version build-java package-java publish-java clean-java jshell help
 
 # Version from VERSION file
 # Note: GnuWin32 Make 3.81 runs $(shell) via CreateProcess, not SHELL,
@@ -152,8 +152,11 @@ serve: build-go
 # Build everything and run all tests: make test
 test: build install-browser
 	@START_TIME=$$(date +%s); \
-	"$(MAKE)" test-cli test-cleanup test-js test-cleanup test-mcp test-cleanup test-python test-cleanup test-java test-cleanup; \
+	"$(MAKE)" test-cli test-cleanup && \
+	"$(MAKE)" test-js-process test-cleanup && \
+	"$(MAKE)" -j 5 test-js-async test-js-sync test-mcp test-python test-java; \
 	EXIT=$$?; \
+	"$(MAKE)" test-cleanup; \
 	END_TIME=$$(date +%s); \
 	ELAPSED=$$((END_TIME - START_TIME)); \
 	MINS=$$((ELAPSED / 60)); \
@@ -192,8 +195,15 @@ test-cli: build-go
 # we suspected parallel-induced flakes; root cause was a cross-process Chrome
 # temp-dir cleanup race in clicker/internal/browser/launcher.go, now fixed.)
 # Process tests stay sequential because they assert on Chrome process lifecycle.
+#
+# The async/sync/process subgroups are also exposed as separate make targets
+# (test-js-async, test-js-sync, test-js-process) so `make test` can run the
+# parallel-safe groups concurrently with test-mcp/test-python/test-java via
+# `$(MAKE) -j 5`. The process group must run alone because it asserts on
+# Chrome PID baselines.
 JS_PARALLEL ?= 4
-test-js: build-go
+
+test-js-async: build-go
 	@echo "--- JS Async Tests (parallel x$(JS_PARALLEL)) ---"
 	$(TIMEOUT_CMD) node --test $(TEST_FLAGS) --test-concurrency=$(JS_PARALLEL) \
 		tests/js/async/async-api.test.js \
@@ -219,6 +229,8 @@ test-js: build-go
 		tests/js/async/object-model.test.js \
 		tests/js/async/navigation.test.js \
 		tests/js/async/lifecycle.test.js
+
+test-js-sync: build-go
 	@echo "--- JS Sync Tests (parallel x$(JS_PARALLEL)) ---"
 	$(TIMEOUT_CMD) node --test $(TEST_FLAGS) --test-concurrency=$(JS_PARALLEL) \
 		tests/js/sync/sync-api.test.js \
@@ -228,10 +240,15 @@ test-js: build-go
 		tests/js/sync/download-sync.test.js \
 		tests/js/sync/a11y-tree-tutorial-sync.test.js \
 		tests/js/sync/downloads-tutorial-sync.test.js
+
+test-js-process: build-go
 	@echo "--- JS Process Tests (sequential) ---"
 	$(TIMEOUT_CMD) node --test $(TEST_FLAGS) --test-concurrency=1 \
 		tests/js/async/process.test.js \
 		tests/js/sync/process.test.js
+
+# Backward-compat aggregate: run all three JS test groups sequentially.
+test-js: test-js-async test-js-sync test-js-process
 
 # Run MCP server tests (sequential - browser sessions)
 test-mcp: build-go
