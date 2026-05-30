@@ -244,16 +244,22 @@ test-daemon: build-go
 	$(TIMEOUT_CMD) node --test $(TEST_FLAGS) --test-concurrency=1 tests/daemon/lifecycle.test.js tests/daemon/concurrency.test.js tests/daemon/cli-commands.test.js tests/daemon/find-refs.test.js tests/daemon/connect.test.js tests/daemon/recording.test.js
 
 # Run Python client tests
+# PY_PARALLEL: pytest-xdist worker count. Each worker spawns its own Chrome,
+# so each adds ~150 MB of memory pressure. Default 4 is conservative; bump
+# for faster CI. Module-scoped browser fixture means xdist's default
+# loadfile distribution gives each file to a single worker — safe under
+# parallel since each file owns its own browser via conftest.py.
+PY_PARALLEL ?= 4
 test-python: build-go install-browser
-	@echo "--- Python Client Tests ---"
+	@echo "--- Python Client Tests (parallel x$(PY_PARALLEL)) ---"
 	@cd clients/python && \
 		if [ ! -d ".venv" ]; then $(PYTHON) -m venv .venv; fi && \
 		. $(VENV_ACTIVATE) && \
-		if ! python -c "import vibium" 2>/dev/null; then \
+		if ! python -c "import vibium, xdist" 2>/dev/null; then \
 			pip install -e ../../packages/python/$(PYTHON_PLATFORM_PKG) -e ".[test]"; \
 		fi && \
 		VIBIUM_BIN_PATH=$(CURDIR)/clicker/bin/vibium$(EXE) \
-		python -m pytest ../../tests/py/ -v --tb=short -x
+		python -m pytest ../../tests/py/ -v --tb=short -x -n $(PY_PARALLEL) --dist=loadfile
 
 # Build Java client JAR (dev — no native binaries, fast)
 build-java: build-go
