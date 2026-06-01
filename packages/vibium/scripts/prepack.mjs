@@ -47,7 +47,11 @@ function buildClient() {
   console.error("[prepack] Building JS client in clients/javascript ...");
   // Send the child's stdout to our stderr (fd 2) so build logs don't pollute
   // stdout either.
-  execFileSync(NPM, ["run", "build"], { cwd: clientDir, stdio: ["ignore", 2, 2] });
+  execFileSync(NPM, ["run", "build"], {
+    cwd: clientDir,
+    stdio: ["ignore", 2, 2],
+    shell: process.platform === "win32",
+  });
 }
 
 function copyDist() {

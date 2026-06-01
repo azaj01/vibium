@@ -66,8 +66,11 @@ build-go: deps
 	cd clicker && go build -ldflags="-X main.version=$(VERSION) -X github.com/vibium/clicker/internal/api.Version=$(VERSION)" -o bin/vibium$(EXE) ./cmd/clicker
 	@if [ -d node_modules/@vibium ]; then \
 		platform=$$(node -e "console.log(require('os').platform()+'-'+(require('os').arch()==='x64'?'x64':'arm64'))"); \
-		target="node_modules/@vibium/$$platform/bin/vibium$(EXE)"; \
-		if [ -f "$$target" ]; then cp clicker/bin/vibium$(EXE) "$$target"; fi; \
+		target_dir="node_modules/@vibium/$$platform/bin"; \
+		if [ -d "node_modules/@vibium/$$platform" ]; then \
+			mkdir -p "$$target_dir"; \
+			cp clicker/bin/vibium$(EXE) "$$target_dir/vibium$(EXE)"; \
+		fi; \
 	fi
 
 # Build JS client
@@ -150,6 +153,31 @@ serve: build-go
 	./clicker/bin/vibium$(EXE) serve
 
 # Build everything and run all tests: make test
+# On Windows, run JS async/sync sequentially to avoid Chrome resource starvation
+# (each group spawns JS_PARALLEL Chrome instances; too many concurrent Chromes
+# causes screenshot timeouts). Other platforms run all 5 groups in parallel.
+ifeq ($(OS),Windows_NT)
+test: build install-browser
+	@START_TIME=$$(date +%s); \
+	"$(MAKE)" test-cli test-cleanup && \
+	"$(MAKE)" test-js-process test-cleanup && \
+	"$(MAKE)" -j 4 test-js-async test-mcp test-python test-java && \
+	"$(MAKE)" test-cleanup && \
+	"$(MAKE)" test-js-sync; \
+	EXIT=$$?; \
+	"$(MAKE)" test-cleanup; \
+	END_TIME=$$(date +%s); \
+	ELAPSED=$$((END_TIME - START_TIME)); \
+	MINS=$$((ELAPSED / 60)); \
+	SECS=$$((ELAPSED % 60)); \
+	echo ""; \
+	if [ $$EXIT -eq 0 ]; then \
+		echo "--- All tests passed in $${MINS}m$${SECS}s ---"; \
+	else \
+		echo "--- Tests failed after $${MINS}m$${SECS}s ---"; \
+		exit $$EXIT; \
+	fi
+else
 test: build install-browser
 	@START_TIME=$$(date +%s); \
 	"$(MAKE)" test-cli test-cleanup && \
@@ -168,6 +196,7 @@ test: build install-browser
 		echo "--- Tests failed after $${MINS}m$${SECS}s ---"; \
 		exit $$EXIT; \
 	fi
+endif
 
 # Kill any Chrome/chromedriver processes left over from tests
 test-cleanup:

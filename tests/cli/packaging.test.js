@@ -25,6 +25,7 @@ describe('Packaging: npm tarball contents', () => {
       cwd: PKG_DIR,
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'inherit'],
+      shell: process.platform === 'win32',
     });
 
     try {
