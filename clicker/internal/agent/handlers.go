@@ -707,7 +707,11 @@ func (h *Handlers) browserClick(args map[string]interface{}) (*ToolsCallResult, 
 	if err != nil {
 		return nil, err
 	}
-	if err := api.Click(s, ctx, api.ElementParams{Selector: selector}); err != nil {
+	ep := api.ElementParams{Selector: selector}
+	if t, ok := argFloat(args, "timeout"); ok {
+		ep.Timeout = time.Duration(t) * time.Millisecond
+	}
+	if err := api.Click(s, ctx, ep); err != nil {
 		return nil, fmt.Errorf("failed to click: %w", err)
 	}
 
@@ -741,7 +745,11 @@ func (h *Handlers) browserType(args map[string]interface{}) (*ToolsCallResult, e
 	if err != nil {
 		return nil, err
 	}
-	if err := api.TypeInto(s, ctx, api.ElementParams{Selector: selector}, text); err != nil {
+	ep := api.ElementParams{Selector: selector}
+	if t, ok := argFloat(args, "timeout"); ok {
+		ep.Timeout = time.Duration(t) * time.Millisecond
+	}
+	if err := api.TypeInto(s, ctx, ep, text); err != nil {
 		return nil, fmt.Errorf("failed to type: %w", err)
 	}
 

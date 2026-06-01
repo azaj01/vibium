@@ -36,9 +36,11 @@ func newTypeCmd() *cobra.Command {
 			}
 
 			// Type into element
+			timeout, _ := cmd.Flags().GetDuration("timeout")
 			result, err := daemonCall("browser_type", map[string]interface{}{
 				"selector": selector,
 				"text":     text,
+				"timeout":  float64(timeout.Milliseconds()),
 			})
 			if err != nil {
 				printError(err)

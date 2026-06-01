@@ -34,7 +34,11 @@ func newClickCmd() *cobra.Command {
 			}
 
 			// Click element
-			result, err := daemonCall("browser_click", map[string]interface{}{"selector": selector})
+			timeout, _ := cmd.Flags().GetDuration("timeout")
+			result, err := daemonCall("browser_click", map[string]interface{}{
+				"selector": selector,
+				"timeout":  float64(timeout.Milliseconds()),
+			})
 			if err != nil {
 				printError(err)
 				return
